@@ -183,3 +183,68 @@ def test_concurrent_subagent_start_and_post_tool_use_keep_count():
         assert s.agents_running == 1, f"lost update on iteration {i}"
         assert s.agent_ids == ["a1"]
         assert s.state == "working"
+
+
+# --- model and context size read from the transcript ---
+
+
+def transcript(tmp_path, model="claude-fable-5-1", ctx=(2, 297, 160203)):
+    p = tmp_path / "transcript.jsonl"
+    line = {
+        "type": "assistant",
+        "isSidechain": False,
+        "message": {
+            "model": model,
+            "usage": {
+                "input_tokens": ctx[0],
+                "cache_creation_input_tokens": ctx[1],
+                "cache_read_input_tokens": ctx[2],
+                "output_tokens": 5,
+            },
+        },
+    }
+    p.write_text(json.dumps({"type": "user"}) + "\n" + json.dumps(line) + "\n")
+    return str(p)
+
+
+def test_stop_reads_model_and_context_from_transcript(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    hook.run(payload("Stop", transcript_path=transcript(tmp_path)), ENV, now=NOW, pid=1)
+    s = store.load("s1")
+    assert s.model == "fable-5.1"
+    assert s.context_tokens == 160502
+    assert s.state == "done"
+
+
+def test_subagent_tool_events_do_not_touch_model_or_context(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    hook.run(payload("Stop", transcript_path=transcript(tmp_path)), ENV, now=NOW, pid=1)
+    (tmp_path / "sub").mkdir()
+    sub = transcript(tmp_path / "sub", model="claude-haiku-4-5-20251001", ctx=(1, 1, 1))
+    hook.run(
+        payload("PostToolUse", tool_name="Read", agent_id="a1", transcript_path=sub),
+        ENV, now=NOW, pid=1,
+    )
+    s = store.load("s1")
+    assert s.model == "fable-5.1"
+    assert s.context_tokens == 160502
+
+
+def test_missing_transcript_leaves_fields_unchanged_and_does_not_raise(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    hook.run(payload("Stop", transcript_path=transcript(tmp_path)), ENV, now=NOW, pid=1)
+    hook.run(
+        payload("UserPromptSubmit", prompt="go", transcript_path=str(tmp_path / "gone.jsonl")),
+        ENV, now=NOW, pid=1,
+    )
+    s = store.load("s1")
+    assert s.state == "working"
+    assert s.model == "fable-5.1"
+    assert s.context_tokens == 160502
+
+
+def test_events_outside_the_read_set_do_not_read_transcript(tmp_path):
+    hook.run(payload("SessionStart", transcript_path=transcript(tmp_path)), ENV, now=NOW, pid=1)
+    s = store.load("s1")
+    assert s.model == ""
+    assert s.context_tokens == 0

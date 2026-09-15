@@ -15,6 +15,7 @@ from supclaude import store
 from supclaude.colors import COLORS, LABELS, SORT_ORDER
 from supclaude.iterm import ItermBridge, uuid_from_env_id
 from supclaude.state import SessionState
+from supclaude.transcript import fmt_tokens
 
 REFRESH_SECONDS = 0.5
 BANNER_OK = "iTerm2 API: connected   keys: 1-9, enter, or double-click jump   r refresh   q quit"
@@ -95,7 +96,7 @@ class SupClaude(App):
         table = SessionTable(
             cursor_type="row", zebra_stripes=True, cursor_foreground_priority="renderable"
         )
-        table.add_columns("#", "session", "state", "agents", "last prompt", "age")
+        table.add_columns("#", "session", "state", "agents", "model", "ctx", "last prompt", "age")
         yield table
 
     async def on_mount(self) -> None:
@@ -135,12 +136,14 @@ class SupClaude(App):
                 Text(s.name or s.session_id[:8], style=f"bold {color}"),
                 Text(LABELS.get(s.state, str(s.state).upper()), style=f"bold {color}"),
                 Text(str(s.agents_running) if s.agents_running else ""),
+                Text(s.model, style="dim"),
+                Text(fmt_tokens(s.context_tokens), style="dim"),
                 Text(s.last_prompt, style="dim"),
                 Text(_age(s.updated_at), style="dim"),
                 key=s.session_id,
             )
         if not sessions:
-            table.add_row("", "no Claude sessions yet", "", "", "", "")
+            table.add_row("", "no Claude sessions yet", "", "", "", "", "", "")
         self._restore_cursor(table, key, row)
 
     @staticmethod

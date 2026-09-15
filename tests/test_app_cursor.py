@@ -28,10 +28,11 @@ def home(tmp_path, monkeypatch):
     return tmp_path
 
 
-def seed(home, session_id: str, *, state: str = "idle", iterm: str = "") -> None:
+def seed(home, session_id: str, *, state: str = "idle", iterm: str = "", **extra) -> None:
     (home / "state" / f"{session_id}.json").write_text(
         json.dumps(
             {
+                **extra,
                 "session_id": session_id,
                 "iterm_session_id": iterm,
                 "cwd": f"/x/{session_id}",
@@ -232,3 +233,32 @@ def test_banner_mentions_enter_and_double_click():
     assert BANNER_OK == (
         "iTerm2 API: connected   keys: 1-9, enter, or double-click jump   r refresh   q quit"
     )
+
+
+def test_model_and_ctx_columns_render(home):
+    seed(home, "a", model="fable-5.1", context_tokens=160203)
+
+    async def run():
+        app = SupClaude()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            table = app.query_one(DataTable)
+            assert [str(c.label) for c in table.columns.values()] == [
+                "#", "session", "state", "agents", "model", "ctx", "last prompt", "age"
+            ]
+            return [c.plain for c in table.get_row_at(0)]
+
+    cells = asyncio.run(run())
+    assert cells[4] == "fable-5.1"
+    assert cells[5] == "160k"
+
+
+def test_placeholder_row_has_one_cell_per_column(home):
+    async def run():
+        app = SupClaude()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            table = app.query_one(DataTable)
+            return len(table.columns), len(table.get_row_at(0))
+
+    assert asyncio.run(run()) == (8, 8)

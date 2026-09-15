@@ -11,12 +11,19 @@ import os
 import subprocess
 import sys
 import traceback
+from dataclasses import replace
 from pathlib import Path
 
 from supclaude import store
 from supclaude.state import SessionState, next_state
+from supclaude.transcript import read_last_usage, short_model
 
 MAX_PARENT_WALK = 8
+
+# Events whose transcript_path is the top-level session's file and that land
+# after an assistant turn wrote its usage. Subagent tool events carry agent_id
+# and point at the subagent's own transcript, so they are excluded.
+TRANSCRIPT_EVENTS = frozenset({"Stop", "PostToolUse", "UserPromptSubmit"})
 
 
 def _now() -> str:
@@ -73,6 +80,27 @@ def find_claude_pid() -> int:
     return fallback
 
 
+def _with_usage(state: SessionState, event: dict) -> SessionState:
+    """Fill model/context_tokens from the transcript; on any problem return state as is.
+
+    This runs inside the live hook on every turn, so it must never raise or
+    slow the hook down: read_last_usage only touches the file's tail.
+    """
+    try:
+        if event.get("hook_event_name") not in TRANSCRIPT_EVENTS or event.get("agent_id"):
+            return state
+        path = event.get("transcript_path")
+        if not path:
+            return state
+        found = read_last_usage(path)
+        if found is None:
+            return state
+        model, ctx = found
+        return replace(state, model=short_model(model), context_tokens=ctx)
+    except Exception:
+        return state
+
+
 def run(stdin_text: str, env: dict, now: str | None = None, pid: int | None = None) -> None:
     now = now or _now()
     try:
@@ -102,7 +130,7 @@ def run(stdin_text: str, env: dict, now: str | None = None, pid: int | None = No
             if new is None:
                 store.delete(session_id)
             else:
-                store.save(new)
+                store.save(_with_usage(new, event))
     except Exception:
         _log(traceback.format_exc())
 

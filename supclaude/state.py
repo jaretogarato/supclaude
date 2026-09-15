@@ -28,6 +28,10 @@ class SessionState:
     # Ids of subagents currently running; agents_running is always len(agent_ids).
     # Kept as a separate field because the dashboard reads agents_running directly.
     agent_ids: list[str] = field(default_factory=list)
+    # Read from the session transcript on each turn (see transcript.py). model is
+    # the short display name; context_tokens is what the model saw last turn.
+    model: str = ""
+    context_tokens: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)

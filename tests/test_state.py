@@ -238,3 +238,17 @@ def test_default_agent_ids_are_not_shared_between_instances():
     b = SessionState(session_id="b")
     a.agent_ids.append("x")
     assert b.agent_ids == []
+
+
+def test_model_and_context_fields_default_and_survive_old_files():
+    old = {"session_id": "s1", "state": "idle", "agents_running": 0}
+    s = SessionState.from_dict(old)
+    assert s.model == ""
+    assert s.context_tokens == 0
+
+
+def test_next_state_carries_model_and_context_through():
+    s = SessionState(session_id="s1", model="fable-5.1", context_tokens=160203)
+    for name in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SubagentStart"):
+        n = next_state(s, ev(name), NOW)
+        assert (n.model, n.context_tokens) == ("fable-5.1", 160203), name

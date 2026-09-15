@@ -47,6 +47,8 @@ supclaude
 
 Keys: `1`–`9`, `Enter`, or double-click jump to that session's tab. `r` refresh. `q` quit.
 
+Columns: `model` and `ctx` show the top-level model and how many tokens are in that session's context window right now, read from the session transcript on each turn.
+
 Any Claude Code session you start after `supclaude install` shows up. Sessions that were already running show up on their next hook event, such as your next prompt.
 
 ## How it finds the right tab
