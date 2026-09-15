@@ -1,5 +1,4 @@
 import json
-import os
 
 import pytest
 
@@ -61,3 +60,38 @@ def test_missing_iterm_env_is_ok():
 
 def test_find_claude_pid_returns_positive_int():
     assert hook.find_claude_pid() > 0
+
+
+def test_session_start_refreshes_iterm_id_and_pid():
+    """`claude --resume` reuses the session id in a new tab/process: refresh both."""
+    hook.run(payload("SessionStart"), {"ITERM_SESSION_ID": "w0t1p0:A"}, now=NOW, pid=1)
+    hook.run(payload("SessionStart"), {"ITERM_SESSION_ID": "w0t2p0:B"}, now=NOW, pid=2)
+    s = store.load("s1")
+    assert s.iterm_session_id == "w0t2p0:B"
+    assert s.pid == 2
+
+
+def test_non_session_start_events_keep_existing_iterm_id_and_pid():
+    hook.run(payload("SessionStart"), {"ITERM_SESSION_ID": "w0t2p0:B"}, now=NOW, pid=2)
+    hook.run(payload("Stop"), {"ITERM_SESSION_ID": "w0t3p0:C"}, now=NOW, pid=3)
+    s = store.load("s1")
+    assert s.iterm_session_id == "w0t2p0:B"
+    assert s.pid == 2
+
+
+def test_find_claude_pid_matches_executable_basename_not_substring(monkeypatch):
+    chain = {
+        100: "200 /bin/zsh -c source /x/.claude/shell-snapshots/snap.sh",
+        200: "300 /usr/local/bin/claude",
+    }
+
+    class FakeResult:
+        def __init__(self, stdout):
+            self.stdout = stdout
+
+    def fake_run(argv, **kwargs):
+        return FakeResult(chain.get(int(argv[-1]), ""))
+
+    monkeypatch.setattr(hook.os, "getppid", lambda: 100)
+    monkeypatch.setattr(hook.subprocess, "run", fake_run)
+    assert hook.find_claude_pid() == 200

@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import traceback
+from pathlib import Path
 
 from supclaude import store
 from supclaude.state import SessionState, next_state
@@ -24,14 +25,20 @@ def _now() -> str:
 
 def _log(msg: str) -> None:
     try:
-        with open(store.home() / "hook.log", "a") as f:
+        home = store.home()
+        home.mkdir(parents=True, exist_ok=True)
+        with open(home / "hook.log", "a") as f:
             f.write(f"{_now()} {msg}\n")
     except OSError:
         pass
 
 
 def find_claude_pid() -> int:
-    """Walk up the parent chain and return the first pid whose command mentions claude.
+    """Walk up the parent chain and return the first pid running the `claude` binary.
+
+    The executable basename must be exactly "claude": a substring match would also
+    hit transient shells like `zsh -c source ~/.claude/shell-snapshots/...`, whose
+    pid dies immediately and makes prune_dead drop the session.
 
     Falls back to the direct parent pid.
     """
@@ -50,7 +57,8 @@ def find_claude_pid() -> int:
         if not out:
             break
         ppid_str, _, command = out.partition(" ")
-        if "claude" in command.lower():
+        argv = command.split()
+        if argv and Path(argv[0]).name == "claude":
             return pid
         try:
             pid = int(ppid_str)
@@ -68,9 +76,12 @@ def run(stdin_text: str, env: dict, now: str | None = None, pid: int | None = No
             _log(f"ignored: no session_id in {stdin_text[:200]!r}")
             return
         current = store.load(session_id) or SessionState(session_id=session_id)
-        if not current.iterm_session_id:
+        # `claude --resume` reuses the session id from a new process and often a new
+        # tab, so SessionStart always re-reads both; other events only fill blanks.
+        is_start = event.get("hook_event_name") == "SessionStart"
+        if is_start or not current.iterm_session_id:
             current.iterm_session_id = env.get("ITERM_SESSION_ID", "")
-        if not current.pid:
+        if is_start or not current.pid:
             current.pid = pid if pid is not None else find_claude_pid()
         new = next_state(current, event, now)
         if new is None:

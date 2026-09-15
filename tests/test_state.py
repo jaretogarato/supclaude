@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 import pytest
 
 from supclaude.state import SessionState, next_state
@@ -13,8 +11,10 @@ def ev(name, **fields):
     return d
 
 
-def base(state="idle", agents=0):
-    return SessionState(session_id="s1", state=state, agents_running=agents)
+def base(state="idle", agents=0, last_prompt=""):
+    return SessionState(
+        session_id="s1", state=state, agents_running=agents, last_prompt=last_prompt
+    )
 
 
 def test_session_start_resets_to_idle_and_fills_name():
@@ -107,3 +107,39 @@ def test_roundtrip_dict():
 def test_from_dict_ignores_unknown_keys():
     s = SessionState.from_dict({"session_id": "s1", "bogus": 1})
     assert s.session_id == "s1"
+
+
+def test_session_start_compact_keeps_state_and_agent_count():
+    """Auto-compaction fires SessionStart mid-turn; it must not reset anything."""
+    s = next_state(base("working", 2), ev("SessionStart", source="compact"), NOW)
+    assert s.state == "working"
+    assert s.agents_running == 2
+    assert s.updated_at == NOW
+
+
+@pytest.mark.parametrize("source", ["startup", "resume", "clear"])
+def test_session_start_other_sources_still_reset(source):
+    s = next_state(base("working", 2), ev("SessionStart", source=source), NOW)
+    assert s.state == "idle"
+    assert s.agents_running == 0
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "<task-notification>agent finished</task-notification>",
+        "<system-reminder>remember this</system-reminder>",
+        "<command-message>compact is running</command-message>",
+        "<local-command-stdout>out</local-command-stdout>",
+    ],
+)
+def test_injected_prompt_keeps_last_prompt_but_still_goes_working(prompt):
+    s = next_state(base("done", last_prompt="fix the bug"), ev("UserPromptSubmit", prompt=prompt), NOW)
+    assert s.state == "working"
+    assert s.last_prompt == "fix the bug"
+
+
+def test_real_prompt_still_replaces_last_prompt():
+    s = next_state(base("done", last_prompt="old"), ev("UserPromptSubmit", prompt="new thing"), NOW)
+    assert s.state == "working"
+    assert s.last_prompt == "new thing"

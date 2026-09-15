@@ -52,10 +52,19 @@ def next_state(current: SessionState, event: dict, now: str) -> SessionState | N
     )
 
     if name == "SessionStart":
+        # source is one of startup/resume/clear/compact. Auto-compaction fires
+        # mid-turn, so it must not reset the state or the agent count.
+        if event.get("source") == "compact":
+            return s
         return replace(s, state="idle", agents_running=0)
 
     if name == "UserPromptSubmit":
-        return replace(s, state="working", last_prompt=_one_line(event.get("prompt", "")))
+        # System-injected turns (<task-notification>, <system-reminder>, ...) also
+        # fire this event; they still mean "working" but must not clobber the prompt.
+        prompt = _one_line(event.get("prompt", ""))
+        if prompt.startswith("<"):
+            prompt = s.last_prompt
+        return replace(s, state="working", last_prompt=prompt)
 
     if name == "PreToolUse":
         if event.get("tool_name") == "AskUserQuestion":
