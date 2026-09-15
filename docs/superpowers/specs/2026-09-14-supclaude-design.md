@@ -70,7 +70,7 @@ Loop:
 1. Watch `~/.supclaude/state/` (poll every 0.5 s; watchdog is optional later).
 2. Drop rows whose `pid` is dead. Delete their file.
 3. Ask iTerm2 for the focused session ID. Subscribe to focus-change events.
-4. If a `done` session's tab gets focus after `updated_at` → mark `seen` (write `seen_at` into the file). `done` + `seen` shows as IDLE.
+4. If a `done` session's tab gets focus → the dashboard writes its state as `idle`.
 5. Render one row per session: index, name, state word, last prompt, age.
 6. Set each tab's color from `colors.py`. Restore default color on quit and on `SessionEnd`.
 
