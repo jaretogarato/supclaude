@@ -12,7 +12,7 @@ from textual.widgets import DataTable, Static
 from textual.widgets.data_table import CellDoesNotExist, RowDoesNotExist
 
 from supclaude import store
-from supclaude.colors import COLORS, LABELS, SORT_ORDER
+from supclaude.colors import COLORS, LABELS, SORT_ORDER, ctx_color
 from supclaude.iterm import ItermBridge, uuid_from_env_id
 from supclaude.state import SessionState
 from supclaude.transcript import fmt_tokens
@@ -137,7 +137,7 @@ class SupClaude(App):
                 Text(LABELS.get(s.state, str(s.state).upper()), style=f"bold {color}"),
                 Text(str(s.agents_running) if s.agents_running else ""),
                 Text(s.model, style="dim"),
-                Text(fmt_tokens(s.context_tokens), style="dim"),
+                Text(fmt_tokens(s.context_tokens), style=ctx_color(s.context_tokens)),
                 Text(s.last_prompt, style="dim"),
                 Text(_age(s.updated_at), style="dim"),
                 key=s.session_id,

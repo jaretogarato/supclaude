@@ -262,3 +262,28 @@ def test_placeholder_row_has_one_cell_per_column(home):
             return len(table.columns), len(table.get_row_at(0))
 
     assert asyncio.run(run()) == (8, 8)
+
+
+def test_ctx_cell_color_follows_token_range(home):
+    """The ctx cell is colored by token count (independent of the state color)."""
+    seed(home, "a", context_tokens=160_203)  # 150k-200k band -> #E87543
+    seed(home, "b", context_tokens=30_000)  # under 50k -> #4CAF50
+
+    def cell_colors(table: DataTable, line: int, text: str) -> set[tuple[int, int, int]]:
+        segs = [s for s in table.render_line(line) if s.text.strip() == text]
+        assert segs, f"{text!r} not found on line {line}"
+        return {s.style.color.triplet for s in segs if s.style and s.style.color}
+
+    async def run():
+        app = SupClaude()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            table = app.query_one(DataTable)
+            assert [c.plain for c in table.get_row_at(0)][5] == "160k"
+            assert [c.plain for c in table.get_row_at(1)][5] == "30k"
+            # Line 0 is the header; line 1 is row 0 ("a"), line 2 is row 1 ("b").
+            return cell_colors(table, 1, "160k"), cell_colors(table, 2, "30k")
+
+    big, small = asyncio.run(run())
+    assert big == {(232, 117, 67)}
+    assert small == {(76, 175, 80)}
