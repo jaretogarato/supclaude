@@ -83,7 +83,8 @@ def test_stop_with_agents_is_agents_else_done():
 
 
 def test_last_agent_stop_while_resting_becomes_done():
-    s = next_state(base("agents", 1), ev("SubagentStop"), NOW)
+    s = next_state(base("agents"), ev("SubagentStart"), NOW)
+    s = next_state(s, ev("SubagentStop"), NOW)
     assert s.state == "done"
     assert s.agents_running == 0
 
@@ -143,3 +144,97 @@ def test_real_prompt_still_replaces_last_prompt():
     s = next_state(base("done", last_prompt="old"), ev("UserPromptSubmit", prompt="new thing"), NOW)
     assert s.state == "working"
     assert s.last_prompt == "new thing"
+
+
+# --- agent id tracking (phantom SubagentStop must not steal a real agent's count) ---
+
+
+def test_subagent_stop_for_unknown_id_is_ignored():
+    s = next_state(base("working"), ev("SubagentStart", agent_id="real"), NOW)
+    s = next_state(s, ev("Stop"), NOW)
+    assert s.state == "agents"
+    assert s.agents_running == 1
+    s = next_state(s, ev("SubagentStop", agent_id="phantom"), NOW)
+    assert s.state == "agents"
+    assert s.agents_running == 1
+    assert s.agent_ids == ["real"]
+    assert s.updated_at == NOW
+
+
+def test_duplicate_subagent_start_of_same_id_counts_once():
+    s = next_state(base("working"), ev("SubagentStart", agent_id="a1"), NOW)
+    s = next_state(s, ev("SubagentStart", agent_id="a1"), NOW)
+    assert s.agents_running == 1
+    assert s.agent_ids == ["a1"]
+
+
+def test_known_id_stop_removes_that_agent_only():
+    s = next_state(base("working"), ev("SubagentStart", agent_id="a1"), NOW)
+    s = next_state(s, ev("SubagentStart", agent_id="a2"), NOW)
+    assert s.agents_running == 2
+    s = next_state(s, ev("SubagentStop", agent_id="a1"), NOW)
+    assert s.agents_running == 1
+    assert s.agent_ids == ["a2"]
+
+
+def test_subagent_start_and_stop_without_agent_id_use_anon_ids():
+    s = next_state(base("working"), ev("SubagentStart"), NOW)
+    assert s.agent_ids == ["anon-1"]
+    s = next_state(s, ev("SubagentStart"), NOW)
+    assert s.agent_ids == ["anon-1", "anon-2"]
+    assert s.agents_running == 2
+    s = next_state(s, ev("SubagentStop"), NOW)
+    assert s.agent_ids == ["anon-1"]
+    assert s.agents_running == 1
+    s = next_state(s, ev("SubagentStop"), NOW)
+    assert s.agent_ids == []
+    assert s.agents_running == 0
+
+
+def test_anonymous_stop_does_not_remove_a_named_agent():
+    s = next_state(base("working"), ev("SubagentStart", agent_id="a1"), NOW)
+    s = next_state(s, ev("SubagentStop"), NOW)
+    assert s.agent_ids == ["a1"]
+    assert s.agents_running == 1
+
+
+def test_session_start_clears_agent_ids():
+    s = next_state(base("working"), ev("SubagentStart", agent_id="a1"), NOW)
+    s = next_state(s, ev("SessionStart", source="startup"), NOW)
+    assert s.agent_ids == []
+    assert s.agents_running == 0
+
+
+def test_session_start_compact_keeps_agent_ids():
+    s = next_state(base("working"), ev("SubagentStart", agent_id="a1"), NOW)
+    s = next_state(s, ev("SessionStart", source="compact"), NOW)
+    assert s.agent_ids == ["a1"]
+    assert s.agents_running == 1
+
+
+def test_last_named_agent_stop_while_resting_becomes_done():
+    s = next_state(base("working"), ev("SubagentStart", agent_id="a1"), NOW)
+    s = next_state(s, ev("Stop"), NOW)
+    assert s.state == "agents"
+    s = next_state(s, ev("SubagentStop", agent_id="a1"), NOW)
+    assert s.state == "done"
+    assert s.agents_running == 0
+
+
+def test_from_dict_without_agent_ids_gives_empty_list():
+    s = SessionState.from_dict({"session_id": "s1", "agents_running": 1})
+    assert s.agent_ids == []
+
+
+def test_roundtrip_dict_with_agent_ids():
+    s = SessionState(session_id="s1", agents_running=2, agent_ids=["a1", "a2"])
+    d = s.to_dict()
+    assert d["agent_ids"] == ["a1", "a2"]
+    assert SessionState.from_dict(d) == s
+
+
+def test_default_agent_ids_are_not_shared_between_instances():
+    a = SessionState(session_id="a")
+    b = SessionState(session_id="b")
+    a.agent_ids.append("x")
+    assert b.agent_ids == []

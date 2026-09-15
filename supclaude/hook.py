@@ -81,19 +81,28 @@ def run(stdin_text: str, env: dict, now: str | None = None, pid: int | None = No
         if not session_id:
             _log(f"ignored: no session_id in {stdin_text[:200]!r}")
             return
-        current = store.load(session_id) or SessionState(session_id=session_id)
-        # `claude --resume` reuses the session id from a new process and often a new
-        # tab, so SessionStart always re-reads both; other events only fill blanks.
-        is_start = event.get("hook_event_name") == "SessionStart"
-        if is_start or not current.iterm_session_id:
-            current.iterm_session_id = env.get("ITERM_SESSION_ID", "")
-        if is_start or not current.pid:
-            current.pid = pid if pid is not None else find_claude_pid()
-        new = next_state(current, event, now)
-        if new is None:
-            store.delete(session_id)
-        else:
-            store.save(new)
+        # Several hook processes for one session fire at the same instant
+        # (SubagentStart + PostToolUse for the Agent tool), so the whole
+        # load -> next_state -> save must run under the per-session lock.
+        with store.locked(session_id):
+            current = store.load(session_id) or SessionState(session_id=session_id)
+            # `claude --resume` reuses the session id from a new process and often a
+            # new tab, so SessionStart always re-reads both; other events only fill
+            # blanks.
+            is_start = event.get("hook_event_name") == "SessionStart"
+            if is_start or not current.iterm_session_id:
+                current.iterm_session_id = env.get("ITERM_SESSION_ID", "")
+            if is_start or not current.pid:
+                current.pid = pid if pid is not None else find_claude_pid()
+            if os.environ.get("SUPCLAUDE_TRACE") or (store.home() / "trace").exists():
+                _log(f"event {event.get('hook_event_name')} source={event.get('source')!r} "
+                     f"tool={event.get('tool_name')!r} sid={session_id[:8]} "
+                     f"agent={event.get('agent_id')!r} -> was {current.state}/{current.agents_running}")
+            new = next_state(current, event, now)
+            if new is None:
+                store.delete(session_id)
+            else:
+                store.save(new)
     except Exception:
         _log(traceback.format_exc())
 

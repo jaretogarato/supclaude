@@ -132,3 +132,54 @@ def test_find_claude_pid_rejects_dotclaude_supclaude_and_claude_app(monkeypatch)
     monkeypatch.setattr(hook.os, "getppid", lambda: 100)
     monkeypatch.setattr(hook.subprocess, "run", fake_run)
     assert hook.find_claude_pid() == 100
+
+
+# --- concurrent hook processes must not lose updates ---
+
+
+def test_hook_run_leaves_no_lock_counted_as_session():
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    hook.run(payload("SubagentStart", agent_id="a1"), ENV, now=NOW, pid=1)
+    assert (store.state_dir() / "s1.lock").exists()
+    assert [s.session_id for s in store.load_all()] == ["s1"]
+
+
+def test_hook_run_takes_the_session_lock(monkeypatch):
+    held = []
+    real_locked = store.locked
+
+    def spy(session_id):
+        held.append(session_id)
+        return real_locked(session_id)
+
+    monkeypatch.setattr(store, "locked", spy)
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    assert held == ["s1"]
+
+
+def test_concurrent_subagent_start_and_post_tool_use_keep_count():
+    """SubagentStart and PostToolUse(Agent) fire as two processes at the same
+    instant. Without a lock, PostToolUse can save a stale agents_running=0 over
+    SubagentStart's 1."""
+    import threading
+
+    start = payload("SubagentStart", agent_id="a1")
+    post = payload("PostToolUse", tool_name="Agent")
+    for i in range(200):
+        store.save(store.SessionState(session_id="s1", state="working", pid=1))
+        go = threading.Barrier(2)
+
+        def fire(text):
+            go.wait()
+            hook.run(text, ENV, now=NOW, pid=1)
+
+        threads = [threading.Thread(target=fire, args=(start,)),
+                   threading.Thread(target=fire, args=(post,))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        s = store.load("s1")
+        assert s.agents_running == 1, f"lost update on iteration {i}"
+        assert s.agent_ids == ["a1"]
+        assert s.state == "working"

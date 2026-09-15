@@ -83,6 +83,8 @@ Claude Code hooks call `supclaude hook` on each event. That writes `~/.supclaude
 
 To see what the iTerm2 bridge is doing, run `SUPCLAUDE_DEBUG=1 supclaude` and read `~/.supclaude/dashboard.log`.
 
+To log every hook event, create the file `~/.supclaude/trace` (or set `SUPCLAUDE_TRACE=1`); events go to `~/.supclaude/hook.log`. Delete the file to stop.
+
 ## Uninstall
 
 ```bash
@@ -97,3 +99,7 @@ uv tool uninstall supclaude
 ```bash
 uv run pytest -q
 ```
+
+## License
+
+MIT licensed. See `LICENSE`.

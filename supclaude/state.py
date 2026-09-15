@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import os
-from dataclasses import asdict, dataclass, fields, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 
 PROMPT_MAX = 80
 
 NEEDS_YOU_NOTIFICATIONS = frozenset(
     {"permission_prompt", "agent_needs_input", "elicitation_dialog"}
 )
+
+ANON_PREFIX = "anon-"
 
 
 @dataclass
@@ -23,6 +25,9 @@ class SessionState:
     last_prompt: str = ""
     updated_at: str = ""
     pid: int = 0
+    # Ids of subagents currently running; agents_running is always len(agent_ids).
+    # Kept as a separate field because the dashboard reads agents_running directly.
+    agent_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -37,6 +42,10 @@ def _one_line(text: str) -> str:
     return " ".join(str(text).split())[:PROMPT_MAX]
 
 
+def _with_agents(s: SessionState, ids: list[str], **extra) -> SessionState:
+    return replace(s, agent_ids=list(ids), agents_running=len(ids), **extra)
+
+
 def next_state(current: SessionState, event: dict, now: str) -> SessionState | None:
     """Return the new state for a hook event, or None when the session ended."""
     name = event.get("hook_event_name", "")
@@ -49,6 +58,7 @@ def next_state(current: SessionState, event: dict, now: str) -> SessionState | N
         cwd=cwd,
         name=os.path.basename(cwd.rstrip("/")) or current.name,
         updated_at=now,
+        agent_ids=list(current.agent_ids),
     )
 
     if name == "SessionStart":
@@ -56,7 +66,7 @@ def next_state(current: SessionState, event: dict, now: str) -> SessionState | N
         # mid-turn, so it must not reset the state or the agent count.
         if event.get("source") == "compact":
             return s
-        return replace(s, state="idle", agents_running=0)
+        return _with_agents(s, [], state="idle")
 
     if name == "UserPromptSubmit":
         # System-injected turns (<task-notification>, <system-reminder>, ...) also
@@ -85,12 +95,23 @@ def next_state(current: SessionState, event: dict, now: str) -> SessionState | N
         return s
 
     if name == "SubagentStart":
-        return replace(s, agents_running=s.agents_running + 1)
+        # Older Claude Code sends no agent_id; count those with synthetic ids.
+        agent_id = event.get("agent_id") or f"{ANON_PREFIX}{len(s.agent_ids) + 1}"
+        ids = s.agent_ids if agent_id in s.agent_ids else s.agent_ids + [agent_id]
+        return _with_agents(s, ids)
 
     if name == "SubagentStop":
-        n = max(0, s.agents_running - 1)
-        state = "done" if (s.state == "agents" and n == 0) else s.state
-        return replace(s, agents_running=n, state=state)
+        # A stop for an id we never saw start (observed in real traces) must not
+        # steal a real agent's count. Anonymous stops only pop anonymous starts.
+        agent_id = event.get("agent_id")
+        if not agent_id:
+            anon = [i for i in s.agent_ids if i.startswith(ANON_PREFIX)]
+            agent_id = anon[-1] if anon else None
+        if agent_id is None or agent_id not in s.agent_ids:
+            return s
+        ids = [i for i in s.agent_ids if i != agent_id]
+        state = "done" if (s.state == "agents" and not ids) else s.state
+        return _with_agents(s, ids, state=state)
 
     if name == "Stop":
         return replace(s, state="agents" if s.agents_running > 0 else "done")
