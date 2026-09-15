@@ -2,6 +2,8 @@
 
 A tiny iTerm2 window that shows the state of every Claude Code session in your other tabs. It colors those tabs too.
 
+It only works inside iTerm2: the hook finds each tab through iTerm2's `ITERM_SESSION_ID` environment variable.
+
 ## States
 
 | Word | Color | Meaning |
@@ -29,7 +31,7 @@ Turn on the iTerm2 API: iTerm2 → Settings → General → Magic → Enable Pyt
 supclaude
 ```
 
-Keys: `1`–`9` jump to that session's tab. `r` refresh. `q` quit.
+Keys: `1`–`9` or `Enter` jump to that session's tab. `r` refresh. `q` quit.
 
 ## Uninstall
 
