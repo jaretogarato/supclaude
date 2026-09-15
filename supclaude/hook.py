@@ -1,0 +1,89 @@
+"""Claude Code hook entry point. Reads hook JSON on stdin, updates the state file.
+
+Rules: never print to stdout, never raise, always exit 0.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import os
+import subprocess
+import sys
+import traceback
+
+from supclaude import store
+from supclaude.state import SessionState, next_state
+
+MAX_PARENT_WALK = 8
+
+
+def _now() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _log(msg: str) -> None:
+    try:
+        with open(store.home() / "hook.log", "a") as f:
+            f.write(f"{_now()} {msg}\n")
+    except OSError:
+        pass
+
+
+def find_claude_pid() -> int:
+    """Walk up the parent chain and return the first pid whose command mentions claude.
+
+    Falls back to the direct parent pid.
+    """
+    pid = os.getppid()
+    fallback = pid
+    for _ in range(MAX_PARENT_WALK):
+        if pid <= 1:
+            break
+        try:
+            out = subprocess.run(
+                ["ps", "-o", "ppid=,command=", "-p", str(pid)],
+                capture_output=True, text=True, timeout=2,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            break
+        if not out:
+            break
+        ppid_str, _, command = out.partition(" ")
+        if "claude" in command.lower():
+            return pid
+        try:
+            pid = int(ppid_str)
+        except ValueError:
+            break
+    return fallback
+
+
+def run(stdin_text: str, env: dict, now: str | None = None, pid: int | None = None) -> None:
+    now = now or _now()
+    try:
+        event = json.loads(stdin_text or "{}")
+        session_id = event.get("session_id") if isinstance(event, dict) else None
+        if not session_id:
+            _log(f"ignored: no session_id in {stdin_text[:200]!r}")
+            return
+        current = store.load(session_id) or SessionState(session_id=session_id)
+        if not current.iterm_session_id:
+            current.iterm_session_id = env.get("ITERM_SESSION_ID", "")
+        if not current.pid:
+            current.pid = pid if pid is not None else find_claude_pid()
+        new = next_state(current, event, now)
+        if new is None:
+            store.delete(session_id)
+        else:
+            store.save(new)
+    except Exception:
+        _log(traceback.format_exc())
+
+
+def main() -> None:
+    try:
+        run(sys.stdin.read(), dict(os.environ))
+    except Exception:
+        _log(traceback.format_exc())
+    sys.exit(0)
