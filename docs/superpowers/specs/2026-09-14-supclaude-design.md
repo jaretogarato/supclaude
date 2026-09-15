@@ -52,7 +52,7 @@ Rules (pure function `next_state(current, event) -> new`):
 - `UserPromptSubmit` → `working`, store `last_prompt`
 - `PreToolUse` with `tool_name == "AskUserQuestion"` → `needs_you`
 - `PermissionRequest` → `needs_you`
-- `Notification` with `notification_type` in {`permission_prompt`, `idle_prompt`, `agent_needs_input`, `elicitation_dialog`} → `needs_you`
+- `Notification` with `notification_type` in {`permission_prompt`, `agent_needs_input`, `elicitation_dialog`} → `needs_you`
 - `PostToolUse` while `needs_you` → `working`
 - `SubagentStart` → `agents_running += 1`
 - `SubagentStop` → `agents_running -= 1` (floor 0). If state is `agents` and count hits 0 → `done`
