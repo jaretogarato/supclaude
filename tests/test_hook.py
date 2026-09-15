@@ -95,3 +95,40 @@ def test_find_claude_pid_matches_executable_basename_not_substring(monkeypatch):
     monkeypatch.setattr(hook.os, "getppid", lambda: 100)
     monkeypatch.setattr(hook.subprocess, "run", fake_run)
     assert hook.find_claude_pid() == 200
+
+
+def test_find_claude_pid_matches_directory_component_named_claude(monkeypatch):
+    chain = {
+        100: "200 /bin/zsh -c source /x/.claude/shell-snapshots/snap.sh",
+        200: "300 /Users/x/.local/share/claude/versions/2.1.223 --append-system-prompt foo",
+    }
+
+    class FakeResult:
+        def __init__(self, stdout):
+            self.stdout = stdout
+
+    def fake_run(argv, **kwargs):
+        return FakeResult(chain.get(int(argv[-1]), ""))
+
+    monkeypatch.setattr(hook.os, "getppid", lambda: 100)
+    monkeypatch.setattr(hook.subprocess, "run", fake_run)
+    assert hook.find_claude_pid() == 200
+
+
+def test_find_claude_pid_rejects_dotclaude_supclaude_and_claude_app(monkeypatch):
+    chain = {
+        100: "200 /x/.claude/shell-snapshots/snap.sh",
+        200: "300 /opt/supclaude/bin/supclaude hook",
+        300: "1 /Applications/Claude.app/Contents/MacOS/Claude",
+    }
+
+    class FakeResult:
+        def __init__(self, stdout):
+            self.stdout = stdout
+
+    def fake_run(argv, **kwargs):
+        return FakeResult(chain.get(int(argv[-1]), ""))
+
+    monkeypatch.setattr(hook.os, "getppid", lambda: 100)
+    monkeypatch.setattr(hook.subprocess, "run", fake_run)
+    assert hook.find_claude_pid() == 100

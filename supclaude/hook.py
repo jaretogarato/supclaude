@@ -36,8 +36,12 @@ def _log(msg: str) -> None:
 def find_claude_pid() -> int:
     """Walk up the parent chain and return the first pid running the `claude` binary.
 
-    The executable basename must be exactly "claude": a substring match would also
-    hit transient shells like `zsh -c source ~/.claude/shell-snapshots/...`, whose
+    A command matches when its executable basename is exactly "claude" (the
+    common case), or when "claude" is one of the executable path's directory
+    components (e.g. launchers like happy run
+    `~/.local/share/claude/versions/2.1.223 ...`). A plain substring match
+    would also hit transient shells like `zsh -c source
+    ~/.claude/shell-snapshots/...` (component ".claude", not "claude"), whose
     pid dies immediately and makes prune_dead drop the session.
 
     Falls back to the direct parent pid.
@@ -58,8 +62,10 @@ def find_claude_pid() -> int:
             break
         ppid_str, _, command = out.partition(" ")
         argv = command.split()
-        if argv and Path(argv[0]).name == "claude":
-            return pid
+        if argv:
+            exe = Path(argv[0])
+            if exe.name == "claude" or "claude" in exe.parts:
+                return pid
         try:
             pid = int(ppid_str)
         except ValueError:
