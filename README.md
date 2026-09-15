@@ -31,7 +31,7 @@ Turn on the iTerm2 API: iTerm2 → Settings → General → Magic → Enable Pyt
 supclaude
 ```
 
-Keys: `1`–`9` or `Enter` jump to that session's tab. `r` refresh. `q` quit.
+Keys: `1`–`9`, `Enter`, or double-click jump to that session's tab. `r` refresh. `q` quit.
 
 ## Uninstall
 

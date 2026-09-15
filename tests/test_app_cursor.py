@@ -1,10 +1,12 @@
-"""Cursor behaviour of the dashboard table: colors, refresh stability, enter-to-jump."""
+"""Cursor behaviour of the dashboard table: colors, refresh stability, enter/double-click jump."""
 
 import asyncio
 import json
 import os
 
 import pytest
+from rich.style import Style
+from textual import events
 from textual.widgets import DataTable
 from textual.widgets.data_table import RowKey
 
@@ -142,5 +144,91 @@ def test_enter_on_row_activates_tab(home, monkeypatch):
     assert calls == ["ABCD-1234"]
 
 
-def test_banner_mentions_enter():
-    assert BANNER_OK == "iTerm2 API: connected   keys: 1-9 or enter jump   r refresh   q quit"
+def _click(table: DataTable, row: int, *, chain: int = 1) -> events.Click:
+    """A synthetic Click carrying the cell meta the DataTable renderer attaches."""
+    return events.Click(
+        table,
+        x=1,
+        y=row + 1,
+        delta_x=0,
+        delta_y=0,
+        button=1,
+        shift=False,
+        meta=False,
+        ctrl=False,
+        style=Style(meta={"row": row, "column": 0}),
+        chain=chain,
+    )
+
+
+@pytest.fixture
+def activate_calls(monkeypatch) -> list[str]:
+    calls: list[str] = []
+
+    async def fake_activate(self, uuid: str) -> None:
+        calls.append(uuid)
+
+    monkeypatch.setattr(ItermBridge, "activate", fake_activate)
+    return calls
+
+
+def test_single_click_moves_cursor_without_jump(home, activate_calls):
+    seed(home, "a", iterm="w0t0p0:AAAA-0000")
+    seed(home, "b", iterm="w0t0p0:BBBB-0000")
+
+    async def run():
+        app = SupClaude()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            table = app.query_one(DataTable)
+            assert table.cursor_row == 0
+            await table._on_click(_click(table, 1))
+            await pilot.pause()
+            return table.cursor_row
+
+    assert asyncio.run(run()) == 1
+    assert activate_calls == []
+
+
+def test_single_click_on_cursor_row_does_not_jump(home, activate_calls):
+    """Stock Textual posts RowSelected when the clicked cell is already the cursor; we must not."""
+    seed(home, "a", iterm="w0t0p0:AAAA-0000")
+    seed(home, "b", iterm="w0t0p0:BBBB-0000")
+
+    async def run():
+        app = SupClaude()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            table = app.query_one(DataTable)
+            await table._on_click(_click(table, 1))
+            await pilot.pause()
+            assert table.cursor_row == 1
+            await table._on_click(_click(table, 1))
+            await pilot.pause()
+            return table.cursor_row
+
+    assert asyncio.run(run()) == 1
+    assert activate_calls == []
+
+
+def test_double_click_jumps_to_row_session(home, activate_calls):
+    seed(home, "a", iterm="w0t0p0:AAAA-0000")
+    seed(home, "b", iterm="w0t0p0:BBBB-0000")
+
+    async def run():
+        app = SupClaude()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            table = app.query_one(DataTable)
+            await table._on_click(_click(table, 1, chain=2))
+            await pilot.pause()
+            return table.cursor_row
+
+    assert asyncio.run(run()) == 1
+    assert activate_calls == [uuid_from_env_id("w0t0p0:BBBB-0000")]
+
+
+def test_banner_mentions_enter_and_double_click():
+    assert BANNER_OK == (
+        "iTerm2 API: connected   keys: 1-9, enter, or double-click jump   r refresh   q quit"
+    )

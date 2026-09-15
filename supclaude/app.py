@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import DataTable, Static
@@ -16,7 +17,7 @@ from supclaude.iterm import ItermBridge, uuid_from_env_id
 from supclaude.state import SessionState
 
 REFRESH_SECONDS = 0.5
-BANNER_OK = "iTerm2 API: connected   keys: 1-9 or enter jump   r refresh   q quit"
+BANNER_OK = "iTerm2 API: connected   keys: 1-9, enter, or double-click jump   r refresh   q quit"
 BANNER_OFF = (
     "iTerm2 API is OFF. Turn on: iTerm2 -> Settings -> General -> Magic -> Enable Python API. "
     "Rows still update; tab colors and jump keys need the API."
@@ -38,6 +39,29 @@ def _age(updated_at: str) -> str:
 
 def sort_sessions(sessions: list[SessionState]) -> list[SessionState]:
     return sorted(sessions, key=lambda s: (SORT_ORDER.get(s.state, 99), s.name.lower(), s.session_id))
+
+
+class SessionTable(DataTable):
+    """DataTable where a single click only highlights and a double click selects.
+
+    Stock Textual posts RowSelected when you click the row already under the
+    cursor, which made a stray second click jump tabs. Here a click just moves
+    the cursor; jumping needs a double click (chain >= 2) or Enter.
+    """
+
+    async def _on_click(self, event: events.Click) -> None:
+        self._set_hover_cursor(True)
+        meta = event.style.meta
+        if "row" not in meta or "column" not in meta:
+            return
+        row_index = meta["row"]
+        if row_index < 0 or row_index >= self.row_count:
+            return  # header or out-of-bounds click
+        self.move_cursor(row=row_index, animate=False)
+        if event.chain >= 2:
+            self.post_message(DataTable.RowSelected(self, row_index, self.ordered_rows[row_index].key))
+        self._scroll_cursor_into_view(animate=True)
+        event.stop()
 
 
 class SupClaude(App):
@@ -68,7 +92,7 @@ class SupClaude(App):
 
     def compose(self) -> ComposeResult:
         yield Static(BANNER_OFF, id="banner")
-        table = DataTable(
+        table = SessionTable(
             cursor_type="row", zebra_stripes=True, cursor_foreground_priority="renderable"
         )
         table.add_columns("#", "session", "state", "agents", "last prompt", "age")
