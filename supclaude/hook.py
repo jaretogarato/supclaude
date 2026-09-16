@@ -16,7 +16,7 @@ from pathlib import Path
 
 from supclaude import store
 from supclaude.state import SessionState, next_state
-from supclaude.transcript import read_last_usage, short_model
+from supclaude.transcript import read_last_up_next, read_last_usage, short_model
 
 MAX_PARENT_WALK = 8
 
@@ -81,22 +81,63 @@ def find_claude_pid() -> int:
 
 
 def _with_usage(state: SessionState, event: dict) -> SessionState:
-    """Fill model/context_tokens from the transcript; on any problem return state as is.
+    """Fill model/context_tokens (and, on Stop, up_next) from the transcript.
 
-    This runs inside the live hook on every turn, so it must never raise or
-    slow the hook down: read_last_usage only touches the file's tail.
+    On any problem return state as is. This runs inside the live hook on every
+    turn, so it must never raise or slow the hook down: both readers only touch
+    the file's tail. up_next is read only on the top-level Stop because mid-turn
+    the transcript still holds the previous reply's line.
     """
     try:
-        if event.get("hook_event_name") not in TRANSCRIPT_EVENTS or event.get("agent_id"):
+        name = event.get("hook_event_name")
+        if name not in TRANSCRIPT_EVENTS or event.get("agent_id"):
             return state
         path = event.get("transcript_path")
         if not path:
             return state
         found = read_last_usage(path)
-        if found is None:
+        if found is not None:
+            model, ctx = found
+            state = replace(state, model=short_model(model), context_tokens=ctx)
+        if name == "Stop":
+            up_next = read_last_up_next(path)
+            if up_next is not None:
+                state = replace(state, up_next=up_next)
+        return state
+    except Exception:
+        return state
+
+
+def _model_from_event(event: dict) -> str:
+    """The short display name in the event's own `model` field, "" when absent.
+
+    SessionStart may carry the model on some Claude Code versions (2.1.273 does
+    not), as a plain string or as a dict with an "id" key.
+    """
+    m = event.get("model")
+    if isinstance(m, dict):
+        m = m.get("id")
+    if not isinstance(m, str) or not m:
+        return ""
+    return short_model(m)
+
+
+def _restore_model_on_clear(state: SessionState, event: dict) -> SessionState:
+    """After `/clear`, give the new session the model of the tab's previous one.
+
+    `/clear` ends the session and starts a new one in the same process, so the
+    old state file (and its model) is gone and the new transcript holds no reply
+    yet. The event's own model wins when a version supplies it; otherwise take
+    what SessionEnd stashed under the pid, which is already a short name. Never
+    raises: this runs inside the live hook.
+    """
+    try:
+        if event.get("hook_event_name") != "SessionStart" or event.get("source") != "clear":
             return state
-        model, ctx = found
-        return replace(state, model=short_model(model), context_tokens=ctx)
+        if state.model:
+            return state
+        model = _model_from_event(event) or store.carry_take(state.pid)
+        return replace(state, model=model) if model else state
     except Exception:
         return state
 
@@ -128,9 +169,12 @@ def run(stdin_text: str, env: dict, now: str | None = None, pid: int | None = No
                      f"agent={event.get('agent_id')!r} -> was {current.state}/{current.agents_running}")
             new = next_state(current, event, now)
             if new is None:
+                # A `/clear` ends this session and starts a new one in the same
+                # process: hand the model to it before the file goes away.
+                store.carry_save(current.pid, current.model)
                 store.delete(session_id)
             else:
-                store.save(_with_usage(new, event))
+                store.save(_restore_model_on_clear(_with_usage(new, event), event))
     except Exception:
         _log(traceback.format_exc())
 

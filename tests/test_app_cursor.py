@@ -244,13 +244,50 @@ def test_model_and_ctx_columns_render(home):
             await pilot.pause(0.3)
             table = app.query_one(DataTable)
             assert [str(c.label) for c in table.columns.values()] == [
-                "#", "session", "state", "agents", "model", "ctx", "last prompt", "age"
+                "#", "session", "state", "agents", "model", "ctx", "last prompt", "age", "up next"
             ]
             return [c.plain for c in table.get_row_at(0)]
 
     cells = asyncio.run(run())
     assert cells[4] == "fable-5.1"
     assert cells[5] == "160k"
+
+
+def test_up_next_column_renders_text(home):
+    seed(home, "a", state="needs_you", up_next="run the tests")
+
+    async def run():
+        app = SupClaude()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            table = app.query_one(DataTable)
+            cells = [c.plain for c in table.get_row_at(0)]
+            # Line 0 is the header; line 1 is row 0. A needs_you row paints the
+            # up-next text in the state color so it stands out.
+            segs = [s for s in table.render_line(1) if s.text.strip() in ("run", "the", "tests", "run the tests")]
+            assert segs, "up next cell text not found on row 0"
+            colors = {s.style.color.triplet for s in segs if s.style and s.style.color}
+            return cells, colors
+
+    cells, colors = asyncio.run(run())
+    assert cells[8] == "run the tests"
+    assert cells[6] == "hi"
+    assert colors == {hex_to_rgb(COLORS["needs_you"])}
+
+
+def test_up_next_column_empty_when_unset(home):
+    seed(home, "a", up_next="")
+
+    async def run():
+        app = SupClaude()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            table = app.query_one(DataTable)
+            return [c.plain for c in table.get_row_at(0)]
+
+    cells = asyncio.run(run())
+    assert cells[8] == ""
+    assert cells[6] == "hi"
 
 
 def test_placeholder_row_has_one_cell_per_column(home):
@@ -261,7 +298,7 @@ def test_placeholder_row_has_one_cell_per_column(home):
             table = app.query_one(DataTable)
             return len(table.columns), len(table.get_row_at(0))
 
-    assert asyncio.run(run()) == (8, 8)
+    assert asyncio.run(run()) == (9, 9)
 
 
 def test_ctx_cell_color_follows_token_range(home):
@@ -287,3 +324,53 @@ def test_ctx_cell_color_follows_token_range(home):
     big, small = asyncio.run(run())
     assert big == {(232, 117, 67)}
     assert small == {(76, 175, 80)}
+
+
+def _stub_tab_titles(monkeypatch, titles: dict[str, str]) -> None:
+    """Make the bridge report these {uuid: tab title} pairs without touching iTerm2."""
+
+    async def fake_tab_titles(self, uuids: set[str]) -> dict[str, str]:
+        return {u: t for u, t in titles.items() if u in uuids}
+
+    monkeypatch.setattr(ItermBridge, "tab_titles", fake_tab_titles)
+
+
+def _session_cells(home) -> list[str]:
+    async def run():
+        app = SupClaude()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            table = app.query_one(DataTable)
+            return [[c.plain for c in table.get_row_at(i)][1] for i in range(table.row_count)]
+
+    return asyncio.run(run())
+
+
+def test_session_cell_uses_iterm_tab_title(home, monkeypatch):
+    """The tab name the user gave beats the folder name, which drifts when Claude cds."""
+    _stub_tab_titles(monkeypatch, {"ABC-123": "shopthefrequency"})
+    seed(home, "a", iterm="w0t1p0:ABC-123")
+
+    assert _session_cells(home) == ["shopthefrequency"]
+
+
+def test_session_cell_falls_back_to_name_when_tab_untitled(home, monkeypatch):
+    """A session missing from the title map keeps SessionState.name."""
+    _stub_tab_titles(monkeypatch, {"ABC-123": "named tab"})
+    seed(home, "a", iterm="w0t1p0:ABC-123")
+    seed(home, "b", iterm="w0t2p0:DEF-456")
+
+    assert _session_cells(home) == ["named tab", "b"]
+
+
+def test_session_cell_keeps_name_when_no_tab_titles(home, monkeypatch):
+    """Disconnected bridge: every row stays on the folder name."""
+    _stub_tab_titles(monkeypatch, {})
+    seed(home, "a", iterm="w0t1p0:ABC-123")
+    seed(home, "b")
+
+    assert _session_cells(home) == ["a", "b"]
+
+
+def test_tab_titles_on_disconnected_bridge_is_empty():
+    assert asyncio.run(ItermBridge().tab_titles({"ABC-123"})) == {}

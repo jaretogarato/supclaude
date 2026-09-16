@@ -95,6 +95,33 @@ class ItermBridge:
         for uuid in list(self._colored):
             await self.set_tab_color(uuid, None)
 
+    async def tab_titles(self, uuids: set[str]) -> dict[str, str]:
+        """{session uuid (upper) -> the name the user gave that iTerm2 tab}.
+
+        Only tabs holding one of `uuids` are asked, and only the tab variable
+        `titleOverride` counts: the session variables `name`/`autoName` hold
+        Claude Code's own dynamic title, not anything the user typed. Tabs the
+        user never named report nothing and are left out so callers fall back.
+        """
+        titles: dict[str, str] = {}
+        if not self.connected:
+            return titles
+        try:
+            wanted = {u.upper() for u in uuids}
+            for w in self._app.terminal_windows:
+                for t in w.tabs:
+                    ids = {s.session_id.upper() for s in t.sessions}
+                    if not ids & wanted:
+                        continue
+                    title = await t.async_get_variable("titleOverride")
+                    if not title:
+                        continue
+                    for uuid in ids & wanted:
+                        titles[uuid] = title
+        except Exception as e:
+            _log(f"tab_titles: {e!r}")
+        return titles
+
     async def watch_focus(self, on_change: Callable[[str], Awaitable[None] | None]) -> None:
         if not self.connected:
             return

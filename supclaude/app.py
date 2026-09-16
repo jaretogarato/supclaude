@@ -90,13 +90,16 @@ class SupClaude(App):
         self.bridge = ItermBridge()
         self.rows: list[SessionState] = []
         self._last_color: dict[str, str] = {}
+        self._tab_titles: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Static(BANNER_OFF, id="banner")
         table = SessionTable(
             cursor_type="row", zebra_stripes=True, cursor_foreground_priority="renderable"
         )
-        table.add_columns("#", "session", "state", "agents", "model", "ctx", "last prompt", "age")
+        table.add_columns(
+            "#", "session", "state", "agents", "model", "ctx", "last prompt", "age", "up next"
+        )
         yield table
 
     async def on_mount(self) -> None:
@@ -122,6 +125,9 @@ class SupClaude(App):
                     store.mark_seen(s.session_id)
                     s.state = "idle"
         self.rows = sessions
+        self._tab_titles = await self.bridge.tab_titles(
+            {uuid_from_env_id(s.iterm_session_id).upper() for s in sessions if s.iterm_session_id}
+        )
         self._render(sessions)
         await self._sync_colors(sessions)
 
@@ -131,19 +137,27 @@ class SupClaude(App):
         table.clear()
         for i, s in enumerate(sessions, start=1):
             color = COLORS.get(s.state, COLORS["idle"])
+            # The iTerm2 tab name wins over s.name: s.name is the cwd's folder,
+            # which drifts whenever Claude changes directory mid-conversation.
+            label = self._tab_titles.get(
+                uuid_from_env_id(s.iterm_session_id).upper()
+            ) or (s.name or s.session_id[:8])
             table.add_row(
                 Text(str(i) if i <= 9 else "", style="bold"),
-                Text(s.name or s.session_id[:8], style=f"bold {color}"),
+                Text(label, style=f"bold {color}"),
                 Text(LABELS.get(s.state, str(s.state).upper()), style=f"bold {color}"),
                 Text(str(s.agents_running) if s.agents_running else ""),
                 Text(s.model, style="dim"),
                 Text(fmt_tokens(s.context_tokens), style=ctx_color(s.context_tokens)),
                 Text(s.last_prompt, style="dim"),
                 Text(_age(s.updated_at), style="dim"),
+                # Painted in the state color when Claude is waiting on you, so a
+                # "waiting for you to pick 1 or 2" line stands out. Plain otherwise.
+                Text(s.up_next, style=color if s.state == "needs_you" else ""),
                 key=s.session_id,
             )
         if not sessions:
-            table.add_row("", "no Claude sessions yet", "", "", "", "", "", "")
+            table.add_row("", "no Claude sessions yet", "", "", "", "", "", "", "")
         self._restore_cursor(table, key, row)
 
     @staticmethod

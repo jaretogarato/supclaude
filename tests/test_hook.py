@@ -248,3 +248,108 @@ def test_events_outside_the_read_set_do_not_read_transcript(tmp_path):
     s = store.load("s1")
     assert s.model == ""
     assert s.context_tokens == 0
+
+
+# --- up_next read from the transcript on Stop ---
+
+
+def transcript_with_text(tmp_path, text, name="transcript.jsonl"):
+    p = tmp_path / name
+    line = {
+        "type": "assistant",
+        "isSidechain": False,
+        "message": {
+            "model": "claude-fable-5-1",
+            "content": [{"type": "text", "text": text}],
+            "usage": {"input_tokens": 1, "cache_read_input_tokens": 2},
+        },
+    }
+    p.write_text(json.dumps({"type": "user"}) + "\n" + json.dumps(line) + "\n")
+    return str(p)
+
+
+def test_stop_fills_up_next_from_transcript(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    path = transcript_with_text(tmp_path, "Done.\n\nUP NEXT: run the p4 planning tests")
+    hook.run(payload("Stop", transcript_path=path), ENV, now=NOW, pid=1)
+    s = store.load("s1")
+    assert s.up_next == "run the p4 planning tests"
+    assert s.model == "fable-5.1"  # usage read still happens alongside
+
+
+def test_post_tool_use_does_not_read_up_next(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    path = transcript_with_text(tmp_path, "UP NEXT: not yet")
+    hook.run(payload("PostToolUse", tool_name="Read", transcript_path=path), ENV, now=NOW, pid=1)
+    assert store.load("s1").up_next == ""
+
+
+def test_stop_without_marker_leaves_up_next_unchanged(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    first = transcript_with_text(tmp_path, "UP NEXT: keep me", name="a.jsonl")
+    hook.run(payload("Stop", transcript_path=first), ENV, now=NOW, pid=1)
+    second = transcript_with_text(tmp_path, "no marker here", name="b.jsonl")
+    hook.run(payload("Stop", transcript_path=second), ENV, now=NOW, pid=1)
+    assert store.load("s1").up_next == "keep me"
+
+
+def test_subagent_stop_with_agent_id_does_not_read_up_next(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    path = transcript_with_text(tmp_path, "UP NEXT: subagent line")
+    hook.run(payload("Stop", agent_id="a1", transcript_path=path), ENV, now=NOW, pid=1)
+    assert store.load("s1").up_next == ""
+
+
+def test_user_prompt_submit_clears_up_next_via_hook(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    path = transcript_with_text(tmp_path, "UP NEXT: stale after next prompt")
+    hook.run(payload("Stop", transcript_path=path), ENV, now=NOW, pid=1)
+    assert store.load("s1").up_next == "stale after next prompt"
+    hook.run(payload("UserPromptSubmit", prompt="go", transcript_path=path), ENV, now=NOW, pid=1)
+    assert store.load("s1").up_next == ""
+
+
+# --- /clear: the new session inherits the model of the tab's previous one ---
+
+
+def test_session_end_stashes_the_model_under_the_pid(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=4242)
+    hook.run(payload("Stop", transcript_path=transcript(tmp_path)), ENV, now=NOW, pid=4242)
+    hook.run(payload("SessionEnd"), ENV, now=NOW, pid=4242)
+    assert store.load("s1") is None
+    assert store.carry_path_for(4242).exists()
+
+
+def test_session_start_from_clear_restores_the_carried_model(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=4242)
+    hook.run(payload("Stop", transcript_path=transcript(tmp_path)), ENV, now=NOW, pid=4242)
+    hook.run(payload("SessionEnd"), ENV, now=NOW, pid=4242)
+    hook.run(payload("SessionStart", session_id="s2", source="clear"), ENV, now=NOW, pid=4242)
+    s = store.load("s2")
+    assert s.model == "fable-5.1"
+    assert s.context_tokens == 0
+    assert not store.carry_path_for(4242).exists()
+
+
+def test_session_start_from_startup_does_not_restore_the_model():
+    store.carry_save(4242, "fable-5.1")
+    hook.run(payload("SessionStart", session_id="s2", source="startup"), ENV, now=NOW, pid=4242)
+    assert store.load("s2").model == ""
+
+
+def test_session_start_model_field_wins_over_the_carried_model():
+    store.carry_save(4242, "fable-5.1")
+    hook.run(
+        payload("SessionStart", session_id="s2", source="clear", model="claude-opus-5"),
+        ENV, now=NOW, pid=4242,
+    )
+    assert store.load("s2").model == "opus-5"
+
+
+def test_session_start_model_field_may_be_a_dict():
+    hook.run(
+        payload("SessionStart", session_id="s2", source="clear",
+                model={"id": "claude-haiku-4-5-20251001"}),
+        ENV, now=NOW, pid=4242,
+    )
+    assert store.load("s2").model == "haiku-4.5"

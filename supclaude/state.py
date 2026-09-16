@@ -32,6 +32,8 @@ class SessionState:
     # the short display name; context_tokens is what the model saw last turn.
     model: str = ""
     context_tokens: int = 0
+    # The reply's trailing "UP NEXT: ..." line (prefix stripped); cleared on each new prompt.
+    up_next: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -78,7 +80,7 @@ def next_state(current: SessionState, event: dict, now: str) -> SessionState | N
         prompt = _one_line(event.get("prompt", ""))
         if prompt.startswith("<"):
             prompt = s.last_prompt
-        return replace(s, state="working", last_prompt=prompt)
+        return replace(s, state="working", last_prompt=prompt, up_next="")
 
     if name == "PreToolUse":
         if event.get("tool_name") == "AskUserQuestion":

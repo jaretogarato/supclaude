@@ -252,3 +252,38 @@ def test_next_state_carries_model_and_context_through():
     for name in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SubagentStart"):
         n = next_state(s, ev(name), NOW)
         assert (n.model, n.context_tokens) == ("fable-5.1", 160203), name
+
+
+# --- up_next: the "UP NEXT:" line from the last reply ---
+
+
+def test_up_next_defaults_empty_and_survives_old_files():
+    old = {"session_id": "s1", "state": "idle", "agents_running": 0}
+    assert SessionState.from_dict(old).up_next == ""
+    assert SessionState.from_dict({"session_id": "s1", "bogus": 1}).up_next == ""
+
+
+def test_up_next_roundtrips_through_dict():
+    s = SessionState(session_id="s1", up_next="run the tests")
+    d = s.to_dict()
+    assert d["up_next"] == "run the tests"
+    assert SessionState.from_dict(d) == s
+
+
+def test_user_prompt_submit_clears_up_next():
+    s = SessionState(session_id="s1", state="done", up_next="run the tests")
+    n = next_state(s, ev("UserPromptSubmit", prompt="go"), NOW)
+    assert n.up_next == ""
+    assert n.state == "working"
+
+
+def test_injected_prompt_also_clears_up_next():
+    s = SessionState(session_id="s1", state="done", up_next="run the tests")
+    n = next_state(s, ev("UserPromptSubmit", prompt="<task-notification>x</task-notification>"), NOW)
+    assert n.up_next == ""
+
+
+@pytest.mark.parametrize("name", ["PostToolUse", "Stop", "SubagentStart", "PreToolUse", "Notification"])
+def test_other_events_keep_up_next(name):
+    s = SessionState(session_id="s1", state="working", up_next="run the tests")
+    assert next_state(s, ev(name), NOW).up_next == "run the tests"

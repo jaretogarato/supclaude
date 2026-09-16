@@ -47,7 +47,25 @@ supclaude
 
 Keys: `1`–`9`, `Enter`, or double-click jump to that session's tab. `r` refresh. `q` quit.
 
-Columns: `model` and `ctx` show the top-level model and how many tokens are in that session's context window right now, read from the session transcript on each turn.
+Columns: `model` and `ctx` show the top-level model and how many tokens are in that session's context window right now, read from the session transcript on each turn. After a `/clear`, `model` carries over from that tab's previous session and `ctx` shows a green `0` until the first reply lands.
+
+`up next` is the last column. It shows the last line of the reply that starts with `UP NEXT:`, which Claude writes when your `~/.claude/CLAUDE.md` asks it to. It lights up in the row's color when Claude is waiting on you.
+
+### Turning on the up next column
+
+Add this to `~/.claude/CLAUDE.md` and Claude ends every reply with a line SupClaude can read:
+
+```
+At the end of every reply, add one final line that starts with "UP NEXT:".
+Rules:
+- It is the last line. Plain text on its own line. No bold, no code block.
+- Keep it under 60 characters.
+- Say the next concrete action, e.g. "UP NEXT: run the p4 planning tests".
+- If you need something from me, say so: "UP NEXT: waiting for you to pick 1 or 2".
+- If nothing is left, write "UP NEXT: done".
+- Do this on every reply, even short ones and questions.
+Why: a terminal app reads this line and shows me what each local agent is doing next.
+```
 
 Any Claude Code session you start after `supclaude install` shows up. Sessions that were already running show up on their next hook event, such as your next prompt.
 
@@ -59,7 +77,7 @@ Every Claude Code session runs in one iTerm2 pane. When Claude starts, the hook 
 - **Tab colors** are set through that pane's profile, so the color follows the Claude pane.
 - **Seen detection** watches which pane has focus. When you land on a DONE session, it turns IDLE.
 
-The session name in the dashboard is the name of the folder Claude was started in. If you name your iTerm2 tabs the same as your project folders, the dashboard rows and your tab bar line up.
+The `session` column shows the name you gave that iTerm2 tab, so the dashboard rows and your tab bar line up. When iTerm2's Python API is off, or the tab has no custom name, it falls back to the name of the working directory's folder. Two Claude sessions running in two panes of the same tab share that tab's name, so both rows show the same thing.
 
 ## How I work, and why SupClaude looks like this
 
