@@ -99,7 +99,7 @@ def _strip_bold(s: str) -> str:
     return s.strip()
 
 
-def _up_next_from_text(text: str) -> str | None:
+def up_next_from_text(text: str) -> str | None:
     """The last "UP NEXT: ..." line of a reply, prefix and bold markers stripped."""
     for line in reversed(text.splitlines()):
         line = _strip_bold(line)
@@ -153,7 +153,7 @@ def read_last_up_next(path: str) -> str | None:
         for raw in _tail_lines(path):
             text = _reply_text_from_line(raw)
             if text is not None:
-                return _up_next_from_text(text)
+                return up_next_from_text(text)
         return None
     except OSError:
         return None

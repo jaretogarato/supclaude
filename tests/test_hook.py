@@ -309,6 +309,96 @@ def test_user_prompt_submit_clears_up_next_via_hook(tmp_path):
     assert store.load("s1").up_next == ""
 
 
+# --- up_next read from the Stop event's own last_assistant_message ---
+
+
+def test_stop_reads_up_next_from_event_without_touching_transcript(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    missing = str(tmp_path / "does-not-exist.jsonl")
+    hook.run(
+        payload(
+            "Stop",
+            transcript_path=missing,
+            last_assistant_message="All green.\n\nUP NEXT: review the diff",
+        ),
+        ENV, now=NOW, pid=1,
+    )
+    assert store.load("s1").up_next == "review the diff"
+
+
+def test_stop_event_message_wins_over_a_stale_transcript(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    path = transcript_with_text(tmp_path, "UP NEXT: stale transcript line")
+    hook.run(
+        payload("Stop", transcript_path=path, last_assistant_message="UP NEXT: fresh event line"),
+        ENV, now=NOW, pid=1,
+    )
+    assert store.load("s1").up_next == "fresh event line"
+
+
+def test_stop_event_message_strips_bold(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    hook.run(
+        payload("Stop", last_assistant_message="**UP NEXT: foo**"),
+        ENV, now=NOW, pid=1,
+    )
+    assert store.load("s1").up_next == "foo"
+
+
+def test_stop_event_message_without_marker_clears_up_next(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    path = transcript_with_text(tmp_path, "UP NEXT: keep me")
+    hook.run(payload("Stop", transcript_path=path), ENV, now=NOW, pid=1)
+    assert store.load("s1").up_next == "keep me"
+    hook.run(
+        payload("Stop", transcript_path=path, last_assistant_message="Done, nothing else."),
+        ENV, now=NOW, pid=1,
+    )
+    assert store.load("s1").up_next == ""
+
+
+def test_stop_with_empty_event_message_falls_back_to_transcript(tmp_path):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    path = transcript_with_text(tmp_path, "UP NEXT: from the transcript")
+    hook.run(
+        payload("Stop", transcript_path=path, last_assistant_message=""),
+        ENV, now=NOW, pid=1,
+    )
+    assert store.load("s1").up_next == "from the transcript"
+
+
+@pytest.mark.parametrize("bad", [None, {"text": "UP NEXT: nope"}, 17, ["UP NEXT: nope"]])
+def test_stop_with_non_string_event_message_falls_back_to_transcript(tmp_path, bad):
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    path = transcript_with_text(tmp_path, "UP NEXT: from the transcript")
+    hook.run(
+        payload("Stop", transcript_path=path, last_assistant_message=bad),
+        ENV, now=NOW, pid=1,
+    )
+    assert store.load("s1").up_next == "from the transcript"
+
+
+def test_stop_event_message_works_with_no_transcript_path():
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    hook.run(payload("Stop", last_assistant_message="UP NEXT: no transcript at all"),
+             ENV, now=NOW, pid=1)
+    assert store.load("s1").up_next == "no transcript at all"
+
+
+def test_subagent_stop_with_agent_id_ignores_event_message():
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    hook.run(payload("Stop", agent_id="a1", last_assistant_message="UP NEXT: subagent"),
+             ENV, now=NOW, pid=1)
+    assert store.load("s1").up_next == ""
+
+
+def test_post_tool_use_ignores_last_assistant_message():
+    hook.run(payload("SessionStart"), ENV, now=NOW, pid=1)
+    hook.run(payload("PostToolUse", tool_name="Read", last_assistant_message="UP NEXT: not yet"),
+             ENV, now=NOW, pid=1)
+    assert store.load("s1").up_next == ""
+
+
 # --- /clear: the new session inherits the model of the tab's previous one ---
 
 

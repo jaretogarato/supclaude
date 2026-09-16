@@ -16,7 +16,12 @@ from pathlib import Path
 
 from supclaude import store
 from supclaude.state import SessionState, next_state
-from supclaude.transcript import read_last_up_next, read_last_usage, short_model
+from supclaude.transcript import (
+    read_last_up_next,
+    read_last_usage,
+    short_model,
+    up_next_from_text,
+)
 
 MAX_PARENT_WALK = 8
 
@@ -80,8 +85,28 @@ def find_claude_pid() -> int:
     return fallback
 
 
+def _with_up_next(state: SessionState, event: dict, path: str | None) -> SessionState:
+    """Fill up_next on a top-level Stop, preferring the event's own final reply.
+
+    Claude Code runs Stop hooks concurrently with its transcript flush, so the
+    reply that just ended the turn is often not in the JSONL yet. The Stop event
+    carries it in `last_assistant_message`, so that field decides when present:
+    a reply with no marker genuinely has no next step and clears up_next. Only
+    when the field is missing (older Claude Code) or not a string do we fall
+    back to the transcript tail, where a None result leaves up_next unchanged
+    rather than blanking a good value on a racy read.
+    """
+    message = event.get("last_assistant_message")
+    if isinstance(message, str) and message:
+        return replace(state, up_next=up_next_from_text(message) or "")
+    if not path:
+        return state
+    up_next = read_last_up_next(path)
+    return replace(state, up_next=up_next) if up_next is not None else state
+
+
 def _with_usage(state: SessionState, event: dict) -> SessionState:
-    """Fill model/context_tokens (and, on Stop, up_next) from the transcript.
+    """Fill model/context_tokens from the transcript and, on Stop, up_next.
 
     On any problem return state as is. This runs inside the live hook on every
     turn, so it must never raise or slow the hook down: both readers only touch
@@ -93,16 +118,13 @@ def _with_usage(state: SessionState, event: dict) -> SessionState:
         if name not in TRANSCRIPT_EVENTS or event.get("agent_id"):
             return state
         path = event.get("transcript_path")
-        if not path:
-            return state
-        found = read_last_usage(path)
-        if found is not None:
-            model, ctx = found
-            state = replace(state, model=short_model(model), context_tokens=ctx)
+        if path:
+            found = read_last_usage(path)
+            if found is not None:
+                model, ctx = found
+                state = replace(state, model=short_model(model), context_tokens=ctx)
         if name == "Stop":
-            up_next = read_last_up_next(path)
-            if up_next is not None:
-                state = replace(state, up_next=up_next)
+            state = _with_up_next(state, event, path)
         return state
     except Exception:
         return state

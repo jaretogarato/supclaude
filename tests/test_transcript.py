@@ -211,3 +211,13 @@ def test_up_next_found_across_chunk_growth(tmp_path):
     p.write_text(text_line("UP NEXT: far back") + "\n" + huge + "\n")
     assert p.stat().st_size > 64 * 1024
     assert read_last_up_next(str(p)) == "far back"
+
+
+def test_up_next_from_text_is_public(tmp_path):
+    from supclaude.transcript import up_next_from_text
+
+    assert up_next_from_text("Done.\n\nUP NEXT: run the tests") == "run the tests"
+    assert up_next_from_text("**UP NEXT: ship it**") == "ship it"
+    assert up_next_from_text("no marker here") is None
+    assert up_next_from_text("UP NEXT:   lots   of   space") == "lots of space"
+    assert up_next_from_text("UP NEXT: " + "x" * 200) == "x" * 80
