@@ -49,11 +49,15 @@ Keys: `1`–`9`, `Enter`, or double-click jump to that session's tab. `r` refres
 
 Columns: `model` and `ctx` show the top-level model and how many tokens are in that session's context window right now, read from the session transcript on each turn. After a `/clear`, `model` carries over from that tab's previous session and `ctx` shows a green `0` until the first reply lands.
 
-`up next` is the last column. It shows the last line of the reply that starts with `UP NEXT:`, which Claude writes when your `~/.claude/CLAUDE.md` asks it to. It lights up in the row's color when Claude is waiting on you.
+### The `up next` column
 
-### Turning on the up next column
+`up next` is the last column. It shows what Claude says it will do next, so you
+can see where every session is headed without opening a single tab. The column
+is optional, and it stays empty until you ask Claude to write that line.
 
-Add this to `~/.claude/CLAUDE.md` and Claude ends every reply with a line SupClaude can read:
+Claude Code reads `~/.claude/CLAUDE.md` at the start of every session, in every
+project, so one file turns this on everywhere. Create it if you do not have one
+and add:
 
 ```
 At the end of every reply, add one final line that starts with "UP NEXT:".
@@ -66,6 +70,17 @@ Rules:
 - Do this on every reply, even short ones and questions.
 Why: a terminal app reads this line and shows me what each local agent is doing next.
 ```
+
+Sessions that are already running will not pick this up. `CLAUDE.md` is read
+once, when a session starts, so run `/clear` in those tabs or start them again.
+
+Two things worth knowing once it is on. The cell clears the moment you send a
+prompt and fills again when the reply lands, so what you see is always from the
+current turn. And models do forget the line sometimes, which leaves the cell
+empty for that turn. That is normal, not a failure.
+
+When a session is waiting on you, the line is painted in the row's color, so
+`UP NEXT: waiting for you to pick 1 or 2` is hard to miss.
 
 Any Claude Code session you start after `supclaude install` shows up. Sessions that were already running show up on their next hook event, such as your next prompt.
 
