@@ -1,3 +1,5 @@
+<img width="1280" height="778" alt="suplaude-ui-02" src="https://github.com/user-attachments/assets/cff3f925-ec4b-4428-9bb0-21a7efb16f85" />
+
 # SupClaude
 
 A tiny iTerm2 window that shows the state of every Claude Code session running in your other iTerm2 tabs. It colors those tabs to match, and it can jump you to any session with one key.
